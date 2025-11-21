@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import warnings
 from plotly.subplots import make_subplots
 import pycountry
 import numpy as np
@@ -14,6 +15,19 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+st.markdown(
+    """
+    <style>
+        /* Add space on the right side of slider labels */
+        .stSlider > div {
+            padding-right: 45px !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 
 def country_to_iso3(country_name):
     """Convert country name to ISO alpha-3 code"""
@@ -90,11 +104,11 @@ st.markdown("---")
 
 with st.sidebar:
     st.header(" Filters & Controls")
-    
     st.subheader("Year Selection")
     years = sorted(df['Year'].unique())
     min_year, max_year = int(min(years)), int(max(years))
     
+    # Year range slider
     year_range = st.slider(
         "Select Year Range",
         min_value=min_year,
@@ -102,14 +116,28 @@ with st.sidebar:
         value=(min_year, max_year),
         step=1
     )
+    # Toggle for single-year mode
+    use_single_year = st.checkbox("Use Single Year Filter", value=False)
+    # Single-year selector only appears if toggle is enabled
+    if use_single_year:
+        # Default value should always be inside the current range
+        default_single_year = min(max(year_range[0], years[0]), year_range[1])
+        single_year = st.select_slider(
+            "Select Single Year from the years range",
+            options=years,
+            value=default_single_year
+        )
+
+        # Automatic correction ONLY when toggle is true
+        if single_year < year_range[0]:
+            single_year = year_range[0]
+        elif single_year > year_range[1]:
+            single_year = year_range[1]
+    else:
+        single_year = None
+  
     
-    single_year = st.select_slider(
-        "Select Single Year (for maps & scatter)",
-        options=years,
-        value=max_year
-    )
-    
-    st.subheader(" Country Selection")
+    st.subheader("Country Selection")
     all_countries = sorted(df['Country'].unique().tolist())
     
     select_all = st.checkbox("Select All Countries", value=True)
@@ -177,6 +205,8 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Key Insights"
 ])
 
+warnings.filterwarnings("ignore", message=".*deprecated.*")
+
 with tab1:
     st.header("Geographic Distribution Analysis")
     
@@ -208,37 +238,49 @@ with tab1:
                 color_continuous_scale='RdYlGn',
                 projection='natural earth'
             )
-            fig_map.update_layout(height=500, geo=dict(showframe=False, showcoastlines=True))
+            fig_map.update_layout(height=600, geo=dict(showframe=False, showcoastlines=True))
             st.plotly_chart(fig_map, width='stretch')
         else:
             st.warning("No data available for the selected filters")
     
     with col2:
         st.subheader("Top 10 Countries")
+
         top_metric = st.selectbox(
             "Rank by",
             ['Production_GWh', 'CO2_Emissions', 'Proportion_of_Energy_from_Renewables'],
             key="top_metric"
         )
-        
-        top_df = df_filtered[df_filtered['Year'] == single_year]
-        
-        if not top_df.empty:
-            top_countries = top_df.nlargest(min(10, len(top_df)), top_metric)[['Country', top_metric]]
-            
+
+        yearly_df = df_filtered[df_filtered['Year'] == single_year]
+
+        if not yearly_df.empty:
+            # Aggregate to avoid duplicates
+            grouped_df = (
+                yearly_df
+                .groupby('Country', as_index=False)[top_metric]
+                .sum()
+            )
+
+            top_countries = grouped_df.nlargest(10, top_metric)
+
             fig_bar = px.bar(
                 top_countries,
                 x=top_metric,
                 y='Country',
                 orientation='h',
-                title=f"Top {len(top_countries)} by {top_metric.replace('_', ' ')}",
-                color=top_metric,
-                color_continuous_scale='Viridis'
             )
-            fig_bar.update_layout(height=500, showlegend=False)
-            st.plotly_chart(fig_bar, width='stretch')
+
+            fig_bar.update_layout(
+                height=500,
+                showlegend=False
+            )
+
+            st.plotly_chart(fig_bar, use_container_width=True)
+
         else:
             st.warning("No data available for the selected filters")
+
 
 with tab2:
     st.header("Trends & Growth Rate Analysis")
