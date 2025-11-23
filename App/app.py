@@ -102,6 +102,44 @@ st.title("Renewable Energy & CO₂ Emissions Analysis Dashboard")
 st.markdown("### Data Science Project: Global Renewable Energy Trends (2000-2023)")
 st.markdown("---")
 
+def prepare_data(df, year_range, selected_countries, selected_energyType, use_single_year, single_year):
+    
+    # Apply year range filter
+    df_filtered = df[
+        (df["Year"] >= year_range[0]) &
+        (df["Year"] <= year_range[1])
+    ]
+    
+    # Single year override
+    if use_single_year and single_year is not None:
+        df_filtered = df_filtered[df_filtered["Year"] == single_year]
+
+    # Country filter
+    if selected_countries is not None and len(selected_countries) > 0:
+        df_filtered = df_filtered[df_filtered["Country"].isin(selected_countries)]
+
+    # Energy Type filter
+    if selected_energyType != "All":
+        df_filtered = df_filtered[df_filtered["Energy_Type"] == selected_energyType]
+
+    # Aggregate data
+    df_grouped = (
+        df_filtered
+        .groupby(["Country", "Year"], as_index=False)
+        .agg({
+            "Production_GWh": "sum",
+            "Installed_Capacity_MW": "sum",
+            "Investments_USD": "sum",
+            "GDP": "mean",
+            "Population": "mean",
+            "Energy_Consumption_GWh": "sum",
+            "CO2_Emissions_Mt": "sum"
+        })
+    )
+
+    return df_grouped, df_filtered
+
+
 with st.sidebar:
     st.header(" Filters & Controls")
     st.subheader("Year Selection")
@@ -151,7 +189,7 @@ with st.sidebar:
             default=all_countries[:5]
         )
     
-    st.subheader("⚡ Energy Type Filter")
+    st.subheader("Energy Type Filter")
     energy_types = ['All'] + sorted(df['Energy_Type'].unique().tolist())
     selected_energy = st.selectbox("Energy Type", energy_types)
     
@@ -209,66 +247,110 @@ warnings.filterwarnings("ignore", message=".*deprecated.*")
 
 with tab1:
     st.header("Geographic Distribution Analysis")
-    
+
     col1, col2 = st.columns([2, 1])
-    
     with col1:
         st.subheader(f"World Map - {single_year}")
+
         map_metric = st.selectbox(
             "Select Metric",
-            ['Proportion_of_Energy_from_Renewables', 'Production_GWh', 'CO2_Emissions', 
-             'Investments', 'Installed_Capacity_MW'],
+            [
+                'Proportion_of_Energy_from_Renewables',
+                'Production_GWh',
+                'CO2_Emissions',
+                'Investments',
+                'Installed_Capacity_MW'
+            ],
             key="map_metric"
         )
-        
-        map_df = df_filtered[df_filtered['Year'] == single_year].dropna(subset=['iso_alpha3'])
-        
+
+        map_df = (
+            df_filtered[df_filtered["Year"] == single_year]
+            .groupby(["Country", "iso_alpha3"], as_index=False)[map_metric]
+            .sum()
+        )
+
         if not map_df.empty:
+
+            # ---------- FORMAT VALUE FUNCTION ----------
+            def human_format(num):
+                if num >= 1e9: return f"{num/1e9:.2f}B"
+                if num >= 1e6: return f"{num/1e6:.2f}M"
+                if num >= 1e3: return f"{num/1e3:.2f}K"
+                return f"{num:.2f}"
+
+            # Format the metric column
+            map_df[f"{map_metric}_formatted"] = map_df[map_metric].apply(human_format)
+
+            # Energy label (text only)
+            if selected_energy == "All":
+                map_df["Energy_Label"] = "All energy types"
+            else:
+                map_df["Energy_Label"] = selected_energy
+
             fig_map = px.choropleth(
                 map_df,
-                locations='iso_alpha3',
+                locations="iso_alpha3",
                 color=map_metric,
-                hover_name='Country',
+                hover_name="Country",
                 hover_data={
-                    'iso_alpha3': False,
-                    map_metric: ':.2f',
-                    'Energy_Type': True
+                    "iso_alpha3": False,
+                     map_metric: True,
+                    "Energy_Label": True           
                 },
                 title=f"{map_metric.replace('_', ' ')} by Country ({single_year})",
-                color_continuous_scale='RdYlGn',
-                projection='natural earth'
+                color_continuous_scale="RdYlGn",
+                projection="natural earth"
             )
+
             fig_map.update_layout(height=600, geo=dict(showframe=False, showcoastlines=True))
-            st.plotly_chart(fig_map, width='stretch')
+            st.plotly_chart(fig_map, use_container_width=True)
+
         else:
             st.warning("No data available for the selected filters")
-    
+
     with col2:
-        st.subheader("Top 10 Countries")
+        st.subheader("Top 5 Countries")
 
         top_metric = st.selectbox(
             "Rank by",
-            ['Production_GWh', 'CO2_Emissions', 'Proportion_of_Energy_from_Renewables'],
+            [
+                'Production_GWh',
+                'CO2_Emissions',
+                'Proportion_of_Energy_from_Renewables'
+            ],
             key="top_metric"
         )
 
-        yearly_df = df_filtered[df_filtered['Year'] == single_year]
+        yearly_df = df_filtered[df_filtered["Year"] == single_year]
 
         if not yearly_df.empty:
-            # Aggregate to avoid duplicates
+
             grouped_df = (
                 yearly_df
-                .groupby('Country', as_index=False)[top_metric]
+                .groupby("Country", as_index=False)[top_metric]
                 .sum()
             )
 
-            top_countries = grouped_df.nlargest(10, top_metric)
+            top_countries = grouped_df.nlargest(5, top_metric)
+
+            # Format top values nicely
+            def human_format(num):
+                if num >= 1e9: return f"{num/1e9:.2f}B"
+                if num >= 1e6: return f"{num/1e6:.2f}M"
+                if num >= 1e3: return f"{num/1e3:.2f}K"
+                return f"{num:.2f}"
+
+            top_countries[f"{top_metric}_formatted"] = top_countries[top_metric].apply(human_format)
 
             fig_bar = px.bar(
                 top_countries,
                 x=top_metric,
-                y='Country',
-                orientation='h',
+                y="Country",
+                orientation="h",
+                hover_data={
+                    top_metric: True
+                }
             )
 
             fig_bar.update_layout(
@@ -280,7 +362,6 @@ with tab1:
 
         else:
             st.warning("No data available for the selected filters")
-
 
 with tab2:
     st.header("Trends & Growth Rate Analysis")
