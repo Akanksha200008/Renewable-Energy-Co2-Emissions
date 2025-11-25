@@ -99,7 +99,7 @@ def get_correlation_insights(corr_matrix, threshold=0.7):
 df = load_data()
 
 st.title("Renewable Energy & CO₂ Emissions Analysis Dashboard")
-st.markdown("### Data Science Project: Global Renewable Energy Trends (2000-2023)")
+st.markdown("Global Renewable Energy Trends (2000-2023)")
 st.markdown("---")
 
 def prepare_data(df, year_range, selected_countries, selected_energyType, use_single_year, single_year):
@@ -237,8 +237,8 @@ st.markdown("---")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Geographic Analysis", 
-    "Trends & Growth", 
-    "Correlations", 
+    "Energy Production and Emission Trends", 
+    "Growth Rates and Energy Consumption", 
     "Country Comparison",
     "Key Insights"
 ])
@@ -258,8 +258,7 @@ with tab1:
                 'Proportion_of_Energy_from_Renewables',
                 'Production_GWh',
                 'CO2_Emissions',
-                'Investments',
-                'Installed_Capacity_MW'
+                'Investments'
             ],
             key="map_metric"
         )
@@ -363,101 +362,148 @@ with tab1:
         else:
             st.warning("No data available for the selected filters")
 
+
 with tab2:
-    st.header("Trends & Growth Rate Analysis")
-    
+    st.header("Trends Analysis")
     st.subheader("Production & Emissions Over Time")
-    
+
     if selected_countries:
         country_color_map = get_country_color_map(selected_countries)
-        
+
         time_df = df_filtered.groupby(['Year', 'Country']).agg({
             'Production_GWh': 'sum',
             'CO2_Emissions': 'sum',
             'Proportion_of_Energy_from_Renewables': 'mean'
         }).reset_index()
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig_prod = px.line(
-                time_df,
-                x='Year',
-                y='Production_GWh',
-                color='Country',
-                color_discrete_map=country_color_map,
-                title="Renewable Energy Production Over Time",
-                markers=True
-            )
-            fig_prod.update_layout(height=400, hovermode='x unified')
-            st.plotly_chart(fig_prod, width='stretch')
-            
-            st.markdown("**What we see:** This chart shows the evolution of renewable energy production across selected countries. Rising trends indicate increased renewable energy adoption.")
-        
-        with col2:
-            fig_co2 = px.line(
-                time_df,
-                x='Year',
-                y='CO2_Emissions',
-                color='Country',
-                color_discrete_map=country_color_map,
-                title="CO₂ Emissions Over Time",
-                markers=True
-            )
-            fig_co2.update_layout(height=400, hovermode='x unified')
-            st.plotly_chart(fig_co2, width='stretch')
-            
-            st.markdown("** What we see:** CO₂ emissions trends. Ideally, we want to see declining trends as renewable energy increases.")
-        
-        st.subheader("Year-over-Year Growth Rates")
-        
+
+        # --------- Production Chart (Top) ---------
+        fig_prod = px.line(
+            time_df,
+            x='Year',
+            y='Production_GWh',
+            color='Country',
+            color_discrete_map=country_color_map,
+            title="Renewable Energy Production Over Time",
+            markers=True
+        )
+        fig_prod.update_layout(height=500, hovermode='x unified')
+        st.plotly_chart(fig_prod, use_container_width=True)
+
+        st.markdown("**What we see:** This shows how renewable energy production changes over time.")
+
+        # --------- CO2 Chart (Bottom) ---------
+        fig_co2 = px.line(
+            time_df,
+            x='Year',
+            y='CO2_Emissions',
+            color='Country',
+            color_discrete_map=country_color_map,
+            title="CO₂ Emissions Over Time",
+            markers=True
+        )
+        fig_co2.update_layout(height=500, hovermode='x unified')
+        st.plotly_chart(fig_co2, use_container_width=True)
+
+        st.markdown("**What we see:** Trends in CO₂ emissions across the selected countries.")
+
+with tab3:
+    st.header("Growth Rate & Energy Composition Analysis")
+
+    if selected_countries:
+        country_color_map = get_country_color_map(selected_countries)
+
+        st.subheader("CAGR Growth Rates (Compound Annual Growth Rate)")
+
+        key_vars = [
+            'Production_GWh', 'CO2_Emissions', 'GDP', 'Population',
+            'Investments', 'Proportion_of_Energy_from_Renewables',
+            'R&D_Expenditure', 'Installed_Capacity_MW', 'Energy_Consumption'
+        ]
+        available_vars = [v for v in key_vars if v in df_filtered.columns]
+
         growth_metric = st.selectbox(
             "Select metric for growth analysis",
-            ['Production_GWh', 'CO2_Emissions', 'Investments', 'Proportion_of_Energy_from_Renewables']
+            ['Production_GWh', 'CO2_Emissions', 'Investments',
+             'Proportion_of_Energy_from_Renewables']
         )
-        
+
+        # ---------------------------
+        # CALCULATE CAGR
+        # ---------------------------
         if len(selected_countries) <= 10:
+
             growth_data = []
+
             for country in selected_countries:
-                gr = calculate_growth_rate(df_filtered, country, growth_metric)
+                cdf = df_filtered[df_filtered["Country"] == country].sort_values("Year")
+
+                if len(cdf) >= 2:
+                    start_val = cdf[growth_metric].iloc[0]
+                    end_val = cdf[growth_metric].iloc[-1]
+                    years = cdf["Year"].iloc[-1] - cdf["Year"].iloc[0]
+
+                    if start_val > 0 and years > 0:
+                        cagr = ((end_val / start_val) ** (1 / years) - 1) * 100
+                    else:
+                        cagr = None
+
+                    gr = pd.DataFrame({
+                        "Country": [country],
+                        "Growth_Rate": [cagr]
+                    })
+                else:
+                    gr = None
+
                 if gr is not None and not gr.empty:
-                    gr['Country'] = country
                     growth_data.append(gr)
-            
+
+            # ---------------------------
+            # PLOT GROWTH – HORIZONTAL BAR
+            # ---------------------------
             if growth_data:
                 growth_df = pd.concat(growth_data, ignore_index=True)
-                
-                fig_growth = px.line(
+
+                fig_growth = px.bar(
                     growth_df,
-                    x='Year',
-                    y='Growth_Rate',
-                    color='Country',
+                    x="Growth_Rate",
+                    y="Country",
+                    orientation='h',
+                    color="Country",
                     color_discrete_map=country_color_map,
-                    title=f"Year-over-Year Growth Rate: {growth_metric.replace('_', ' ')}",
-                    markers=True
+                    title=f"CAGR: {growth_metric.replace('_', ' ')}",
                 )
-                fig_growth.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Zero Growth")
-                fig_growth.update_layout(height=400, yaxis_title="Growth Rate (%)")
-                st.plotly_chart(fig_growth, width='stretch')
-                
-                avg_growth = growth_df.groupby('Country')['Growth_Rate'].mean().sort_values(ascending=False)
-                st.markdown(f"** Conclusion:** Average growth rates show which countries are expanding renewable energy fastest. Positive values indicate growth, negative indicate decline.")
-                
+
+                fig_growth.update_layout(
+                    height=500,
+                    xaxis_title="CAGR (%)",
+                    yaxis_title="",
+                )
+
+                st.plotly_chart(fig_growth, use_container_width=True)
+
+                # Summary boxes
+                sorted_vals = growth_df.set_index("Country")['Growth_Rate'].sort_values(ascending=False)
+
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.success(f"**Highest Growth:** {avg_growth.index[0]} ({avg_growth.iloc[0]:.1f}% avg)")
+                    st.success(f"**Highest CAGR:** {sorted_vals.index[0]} ({sorted_vals.iloc[0]:.2f}%)")
+
                 with col2:
-                    if avg_growth.iloc[-1] < 0:
-                        st.error(f"**Declining:** {avg_growth.index[-1]} ({avg_growth.iloc[-1]:.1f}% avg)")
+                    if sorted_vals.iloc[-1] < 0:
+                        st.error(f"**Declining:** {sorted_vals.index[-1]} ({sorted_vals.iloc[-1]:.2f}%)")
                     else:
-                        st.info(f"**Lowest Growth:** {avg_growth.index[-1]} ({avg_growth.iloc[-1]:.1f}% avg)")
+                        st.info(f"**Lowest CAGR:** {sorted_vals.index[-1]} ({sorted_vals.iloc[-1]:.2f}%)")
+
         else:
             st.info("Select 10 or fewer countries to view growth rate analysis")
-        
+
+        # ---------------------------
+        # ENERGY DISTRIBUTION AREA CHART
+        # ---------------------------
         st.subheader("Energy Type Distribution")
-        
+
         energy_dist = df_filtered.groupby(['Year', 'Energy_Type'])['Production_GWh'].sum().reset_index()
-        
+
         fig_area = px.area(
             energy_dist,
             x='Year',
@@ -466,73 +512,11 @@ with tab2:
             title="Energy Production by Type (Stacked Area Chart)",
             color_discrete_sequence=px.colors.qualitative.Set3
         )
-        fig_area.update_layout(height=400)
-        st.plotly_chart(fig_area, width='stretch')
-        
-        st.markdown("** What we see:** The composition of renewable energy sources over time. This shows which renewable technologies dominate in the selected regions.")
 
-with tab3:
-    st.header("Correlation Analysis")
-    
-    st.subheader("Correlation Heatmap")
-    
-    key_vars = [
-        'Production_GWh', 'CO2_Emissions', 'GDP', 'Population', 
-        'Investments', 'Proportion_of_Energy_from_Renewables',
-        'R&D_Expenditure', 'Installed_Capacity_MW', 'Energy_Consumption'
-    ]
-    
-    available_vars = [v for v in key_vars if v in df_filtered.columns]
-    
-    if len(available_vars) >= 3:
-        corr_df = df_filtered[available_vars].dropna()
-        
-        if not corr_df.empty:
-            corr = corr_df.corr()
-            
-            fig_corr = px.imshow(
-                corr,
-                text_auto='.2f',
-                aspect='auto',
-                title="Correlation Matrix: Key Energy & Economic Indicators",
-                color_continuous_scale='RdBu_r',
-                zmin=-1,
-                zmax=1
-            )
-            fig_corr.update_layout(
-                height=700,
-                width=900,
-                xaxis_title="",
-                yaxis_title=""
-            )
-            fig_corr.update_xaxes(tickangle=45)
-            st.plotly_chart(fig_corr, width='stretch')
-            
-            st.markdown("###  How to Read This Heatmap:")
-            st.markdown("""
-            - **Values range from -1 to +1**
-            - **+1 (Dark Red)**: Perfect positive correlation - variables increase together
-            - **0 (White)**: No correlation
-            - **-1 (Dark Blue)**: Perfect negative correlation - one increases as other decreases
-            - **|0.7-1.0|**: Strong correlation
-            - **|0.4-0.7|**: Moderate correlation
-            - **|0.0-0.4|**: Weak correlation
-            """)
-            
-            st.subheader("Key Insights from Correlations")
-            insights = get_correlation_insights(corr, threshold=0.6)
-            
-            if insights:
-                for insight in insights:
-                    st.markdown(insight)
-            else:
-                st.info("No strong correlations (>0.6) found in the selected data")
-            
-            st.subheader("Detailed Correlation Values")
-            corr_styled = corr.style.background_gradient(cmap='RdBu_r', vmin=-1, vmax=1).format("{:.3f}")
-            st.dataframe(corr_styled, width='stretch')
-    else:
-        st.warning("Insufficient data for correlation analysis")
+        fig_area.update_layout(height=400)
+        st.plotly_chart(fig_area, use_container_width=True)
+
+        st.markdown("**What we see:** How different renewable energy sources contribute over time.")
 
 with tab4:
     st.header("Country-by-Country Comparison")
@@ -582,7 +566,7 @@ with tab4:
             )
         
         fig_scatter.update_layout(height=600)
-        st.plotly_chart(fig_scatter, width='stretch')
+        st.plotly_chart(fig_scatter, use_container_width=True)
         
         st.markdown("### What This Shows:")
         st.markdown("""
@@ -629,7 +613,7 @@ with tab4:
             title=f"{metric_choice.replace('_', ' ')} by Country ({single_year})"
         )
         fig_comparison.update_layout(height=400, showlegend=False, xaxis_tickangle=-45)
-        st.plotly_chart(fig_comparison, width='stretch')
+        st.plotly_chart(fig_comparison, use_container_width=True)
 
 with tab5:
     st.header(" Key Insights & Conclusions")
